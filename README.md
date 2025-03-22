@@ -1,3 +1,133 @@
+# Solana Token Swap Contract
+
+A simple token swap smart contract on the Solana blockchain, developed using the Anchor framework. This contract allows users to swap between two tokens at a 1:1 ratio.
+
+## Features
+
+- Simple 1:1 token swap mechanism
+- Support for swapping between any SPL tokens
+- Built with the Anchor framework for clean, concise code
+- Comprehensive test suite
+
+## Contract Functionality
+
+1. **Initialize Swap Pool**: Create a new swap pool, setting up token A and token B mints and accounts
+2. **Swap Token A to Token B**: Users can swap token A for an equal amount of token B
+3. **Swap Token B to Token A**: Users can swap token B for an equal amount of token A
+
+## Code Structure
+
+- **SwapPool**: Account structure that stores swap pool information, including mint addresses and token accounts for both tokens
+- **Initialize**: Instruction context for initializing the swap pool
+- **Swap**: Instruction context for executing token swaps
+
+## Setup Guide
+
+### Prerequisites
+
+1. Install Rust and Solana CLI tools:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sh -c "$(curl -sSfL https://release.solana.com/v1.16.0/install)"
+```
+
+2. Install Anchor framework:
+
+```bash
+npm install -g @project-serum/anchor-cli
+```
+
+3. Install project dependencies:
+
+```bash
+npm install
+```
+
+### Building the Project
+
+1. Build the Anchor project:
+
+```bash
+anchor build
+```
+
+This will generate deployment files in the `target/deploy` directory.
+
+2. Update the program ID:
+
+After building, copy the generated program ID and update the value in the `declare_id!()` macro and in the Anchor.toml file.
+
+```bash
+solana address -k target/deploy/solana_swap-keypair.json
+```
+
+Update the address in the `lib.rs` file in the `declare_id!()` and in the `Anchor.toml` file.
+
+## Testing Guide
+
+### Testing in Local Environment
+
+1. Start a local Solana test validator:
+
+```bash
+solana-test-validator
+```
+
+2. Run Anchor tests:
+
+```bash
+anchor test
+```
+
+This will execute the test suite in the `tests` directory, which will:
+
+- Create token mints for token A and token B
+- Set up user and pool token accounts
+- Initialize the swap pool
+- Test swapping token A for token B
+- Test swapping token B for token A
+
+## Deployment Guide
+
+1. Configure Solana cluster:
+
+```bash
+# Use devnet
+solana config set --url devnet
+# Or use mainnet
+solana config set --url mainnet-beta
+```
+
+2. Deploy the program:
+
+```bash
+anchor deploy
+```
+
+## Usage Flow
+
+1. Initialize the swap pool
+2. Provide sufficient token A and token B liquidity to the swap pool
+3. Users can call the `swap_a_to_b` function to swap token A for token B
+4. Users can call the `swap_b_to_a` function to swap token B for token A
+
+## Security Considerations
+
+1. This contract only implements basic 1:1 token swap functionality without advanced features like fees or slippage protection
+2. Additional security checks and error handling should be added for production environments
+3. A comprehensive security audit is recommended before deploying to mainnet
+
+## Contributing
+
+Contributions are welcome through Pull Requests or Issues to improve the code or suggest enhancements.
+
+## License
+
+This project is licensed under the MIT License.
+
+---
+
 # Solana 代币交换合约
 
 一个基于 Solana 区块链的简单代币交换智能合约，使用 Anchor 框架开发。该合约允许用户以 1:1 的比例在两种代币之间进行互换。
@@ -74,39 +204,19 @@ solana address -k target/deploy/solana_swap-keypair.json
 solana-test-validator
 ```
 
-2. 创建测试代币：
-
-```bash
-# 创建代币A
-spl-token create-token --decimals 9
-# 创建代币B
-spl-token create-token --decimals 9
-```
-
-记下生成的代币铸币厂地址。
-
-3. 创建代币账户并铸造代币：
-
-```bash
-# 为代币A创建账户
-spl-token create-account <代币A铸币厂地址>
-# 为代币B创建账户
-spl-token create-account <代币B铸币厂地址>
-# 铸造代币A
-spl-token mint <代币A铸币厂地址> 1000000000
-# 铸造代币B
-spl-token mint <代币B铸币厂地址> 1000000000
-```
-
-4. 运行 Anchor 测试：
+2. 运行 Anchor 测试：
 
 ```bash
 anchor test
 ```
 
-### 编写测试用例
+这将执行`tests`目录中的测试套件，包括：
 
-在`tests`目录下编写测试用例。示例测试脚本可参考项目文档。
+- 创建代币 A 和代币 B 的铸币厂
+- 为用户和交换池设置代币账户
+- 初始化交换池
+- 测试代币 A 兑换代币 B
+- 测试代币 B 兑换代币 A
 
 ## 部署指南
 
