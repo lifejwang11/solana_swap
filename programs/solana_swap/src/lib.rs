@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token;
-use anchor_spl::token::{Token, Transfer};
+use anchor_spl::token::{Token, Transfer, TokenAccount};
 
 declare_id!("GorTDpuWrsRf3THg5EpS2i3PLuncQZEhYRBi8ZBKSDo5");
 
@@ -22,6 +22,21 @@ pub mod solana_swap {
     }
 
     pub fn swap_a_to_b(ctx: Context<Swap>, amount: u64) -> Result<()> {
+        // 验证数量大于0
+        require!(amount > 0, ErrorCode::InvalidAmount);
+        
+        // 验证用户账户有足够的代币A
+        require!(
+            ctx.accounts.user_token_a.amount >= amount,
+            ErrorCode::InsufficientFunds
+        );
+        
+        // 验证池子有足够的代币B
+        require!(
+            ctx.accounts.pool_token_b.amount >= amount,
+            ErrorCode::InsufficientFunds
+        );
+
         // 从用户的代币A账户转移到池子的代币A账户
         let transfer_a_to_pool = Transfer {
             from: ctx.accounts.user_token_a.to_account_info(),
@@ -63,6 +78,21 @@ pub mod solana_swap {
     }
 
     pub fn swap_b_to_a(ctx: Context<Swap>, amount: u64) -> Result<()> {
+        // 验证数量大于0
+        require!(amount > 0, ErrorCode::InvalidAmount);
+        
+        // 验证用户账户有足够的代币B
+        require!(
+            ctx.accounts.user_token_b.amount >= amount,
+            ErrorCode::InsufficientFunds
+        );
+        
+        // 验证池子有足够的代币A
+        require!(
+            ctx.accounts.pool_token_a.amount >= amount,
+            ErrorCode::InsufficientFunds
+        );
+
         // 从用户的代币B账户转移到池子的代币B账户
         let transfer_b_to_pool = Transfer {
             from: ctx.accounts.user_token_b.to_account_info(),
@@ -115,14 +145,23 @@ pub struct Initialize<'info> {
         bump
     )]
     pub swap_pool: Account<'info, SwapPool>,
-    /// CHECK: 通过token_a_account的约束验证
-    pub token_a_mint: UncheckedAccount<'info>,
-    /// CHECK: 通过token_b_account的约束验证
-    pub token_b_mint: UncheckedAccount<'info>,
-    /// CHECK: 通过约束验证
-    pub token_a_account: UncheckedAccount<'info>,
-    /// CHECK: 通过约束验证
-    pub token_b_account: UncheckedAccount<'info>,
+    
+    pub token_a_mint: Account<'info, token::Mint>,
+    
+    pub token_b_mint: Account<'info, token::Mint>,
+    
+    #[account(
+        constraint = token_a_account.mint == token_a_mint.key() @ ErrorCode::InvalidMint,
+        constraint = token_a_account.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+    )]
+    pub token_a_account: Account<'info, TokenAccount>,
+    
+    #[account(
+        constraint = token_b_account.mint == token_b_mint.key() @ ErrorCode::InvalidMint,
+        constraint = token_b_account.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+    )]
+    pub token_b_account: Account<'info, TokenAccount>,
+    
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -139,21 +178,35 @@ pub struct Swap<'info> {
     )]
     pub swap_pool: Account<'info, SwapPool>,
     
-    #[account(mut)]
-    /// CHECK: 由约束条件验证
-    pub pool_token_a: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = pool_token_a.mint == swap_pool.token_a_mint @ ErrorCode::InvalidMint,
+        constraint = pool_token_a.key() == swap_pool.token_a_account @ ErrorCode::InvalidAccount,
+        constraint = pool_token_a.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+    )]
+    pub pool_token_a: Account<'info, TokenAccount>,
     
-    #[account(mut)]
-    /// CHECK: 由约束条件验证
-    pub pool_token_b: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = pool_token_b.mint == swap_pool.token_b_mint @ ErrorCode::InvalidMint,
+        constraint = pool_token_b.key() == swap_pool.token_b_account @ ErrorCode::InvalidAccount,
+        constraint = pool_token_b.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+    )]
+    pub pool_token_b: Account<'info, TokenAccount>,
     
-    #[account(mut)]
-    /// CHECK: 由约束条件验证
-    pub user_token_a: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = user_token_a.mint == swap_pool.token_a_mint @ ErrorCode::InvalidMint,
+        constraint = user_token_a.owner == user.key() @ ErrorCode::InvalidOwner
+    )]
+    pub user_token_a: Account<'info, TokenAccount>,
     
-    #[account(mut)]
-    /// CHECK: 由约束条件验证
-    pub user_token_b: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = user_token_b.mint == swap_pool.token_b_mint @ ErrorCode::InvalidMint,
+        constraint = user_token_b.owner == user.key() @ ErrorCode::InvalidOwner
+    )]
+    pub user_token_b: Account<'info, TokenAccount>,
     
     #[account(mut)]
     pub user: Signer<'info>,
@@ -179,4 +232,18 @@ impl SwapPool {
         32 + // token_b_account
         32 + // authority
         4 + 32; // seed (4字节长度 + 最多32字节数据)
+}
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("铸币厂不匹配")]
+    InvalidMint,
+    #[msg("账户所有者不匹配")]
+    InvalidOwner,
+    #[msg("账户不匹配")]
+    InvalidAccount,
+    #[msg("余额不足")]
+    InsufficientFunds,
+    #[msg("无效的交换金额")]
+    InvalidAmount,
 }

@@ -31,8 +31,8 @@ describe("solana_swap", () => {
   let swapPool: anchor.web3.PublicKey = null;
   let swapPoolBump: number = null;
 
-  // 使用固定长度的随机种子
-  const randomSeed = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+  // 使用固定长度的数组作为种子（不再使用Buffer）
+  const randomSeed = [1, 2, 3, 4, 5, 6, 7, 8];
 
   // 在所有测试之前进行初始化设置
   before(async () => {
@@ -65,7 +65,7 @@ describe("solana_swap", () => {
 
       // 找到交换池PDA，使用随机种子
       [swapPool, swapPoolBump] = await anchor.web3.PublicKey.findProgramAddress(
-        [Buffer.from("swap_authority"), randomSeed],
+        [Buffer.from("swap_authority"), Buffer.from(randomSeed)],
         program.programId
       );
       console.log(`交换池PDA: ${swapPool.toString()}, Bump: ${swapPoolBump}`);
