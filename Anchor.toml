@@ -6,7 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-solana_swap = "GorTDpuWrsRf3THg5EpS2i3PLuncQZEhYRBi8ZBKSDo5"
+solana_swap = "2jqEjX5ibAKsTWcXGbL9RaGzEFJbAPig9G95SFguhq71"
+
+[programs.devnet]
+solana_swap = "2jqEjX5ibAKsTWcXGbL9RaGzEFJbAPig9G95SFguhq71"
 
 [registry]
 url = "https://api.apr.dev"
