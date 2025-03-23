@@ -28,11 +28,8 @@ describe("solana_swap", () => {
   let poolTokenB: anchor.web3.PublicKey = null;
   let userTokenA: anchor.web3.PublicKey = null;
   let userTokenB: anchor.web3.PublicKey = null;
-  let swapPool: anchor.web3.PublicKey = null;
-  let swapPoolBump: number = null;
-
-  // 使用固定长度的数组作为种子（不再使用Buffer）
-  const randomSeed = [1, 2, 3, 4, 5, 6, 7, 8];
+  let poolAuthority: anchor.web3.PublicKey = null;
+  let poolAuthorityBump: number = null;
 
   // 在所有测试之前进行初始化设置
   before(async () => {
@@ -63,12 +60,15 @@ describe("solana_swap", () => {
       );
       console.log(`创建代币B铸币厂: ${tokenBMint.toString()}`);
 
-      // 找到交换池PDA，使用随机种子
-      [swapPool, swapPoolBump] = await anchor.web3.PublicKey.findProgramAddress(
-        [Buffer.from("swap_authority"), Buffer.from(randomSeed)],
-        program.programId
+      // 找到池子权限PDA
+      [poolAuthority, poolAuthorityBump] =
+        await anchor.web3.PublicKey.findProgramAddress(
+          [Buffer.from("pool_authority")],
+          program.programId
+        );
+      console.log(
+        `池子权限PDA: ${poolAuthority.toString()}, Bump: ${poolAuthorityBump}`
       );
-      console.log(`交换池PDA: ${swapPool.toString()}, Bump: ${swapPoolBump}`);
 
       // 为用户创建代币账户
       userTokenA = await createAccount(
@@ -109,52 +109,18 @@ describe("solana_swap", () => {
         1000000000
       );
 
-      // 为交换池创建代币账户
-      try {
-        console.log("为交换池创建代币账户...");
+      // 找到代币池子PDA
+      [poolTokenA] = await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("token_pool_a"), tokenAMint.toBuffer()],
+        program.programId
+      );
+      console.log(`代币A池子PDA: ${poolTokenA.toString()}`);
 
-        // 使用随机生成的密钥对创建账户
-        poolTokenA = await createAccount(
-          provider.connection,
-          provider.wallet.payer,
-          tokenAMint,
-          swapPool,
-          Keypair.generate()
-        );
-        console.log(`交换池代币A账户: ${poolTokenA.toString()}`);
-
-        poolTokenB = await createAccount(
-          provider.connection,
-          provider.wallet.payer,
-          tokenBMint,
-          swapPool,
-          Keypair.generate()
-        );
-        console.log(`交换池代币B账户: ${poolTokenB.toString()}`);
-
-        // 向交换池中注入流动性
-        console.log("向交换池注入流动性...");
-        await mintTo(
-          provider.connection,
-          provider.wallet.payer,
-          tokenAMint,
-          poolTokenA,
-          provider.wallet.publicKey,
-          1000000000
-        );
-
-        await mintTo(
-          provider.connection,
-          provider.wallet.payer,
-          tokenBMint,
-          poolTokenB,
-          provider.wallet.publicKey,
-          1000000000
-        );
-      } catch (err) {
-        console.error("设置交换池账户时出错:", err);
-        throw err;
-      }
+      [poolTokenB] = await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("token_pool_b"), tokenBMint.toBuffer()],
+        program.programId
+      );
+      console.log(`代币B池子PDA: ${poolTokenB.toString()}`);
     } catch (err) {
       console.error("设置测试环境时出错:", err);
       throw err;
@@ -165,14 +131,14 @@ describe("solana_swap", () => {
     console.log("测试: 初始化交换池");
     try {
       await program.methods
-        .initialize(randomSeed)
+        .initialize()
         .accounts({
-          swapPool: swapPool,
+          poolAuthority: poolAuthority,
+          poolTokenA: poolTokenA,
+          poolTokenB: poolTokenB,
           tokenAMint: tokenAMint,
           tokenBMint: tokenBMint,
-          tokenAAccount: poolTokenA,
-          tokenBAccount: poolTokenB,
-          authority: provider.wallet.publicKey,
+          admin: provider.wallet.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
           rent: anchor.web3.SYSVAR_RENT_PUBKEY,
@@ -181,12 +147,25 @@ describe("solana_swap", () => {
 
       console.log("交换池初始化成功");
 
-      // 验证交换池初始化成功
-      const poolAccount = await program.account.swapPool.fetch(swapPool);
-      assert.equal(poolAccount.tokenAMint.toString(), tokenAMint.toString());
-      assert.equal(poolAccount.tokenBMint.toString(), tokenBMint.toString());
-      assert.equal(poolAccount.tokenAAccount.toString(), poolTokenA.toString());
-      assert.equal(poolAccount.tokenBAccount.toString(), poolTokenB.toString());
+      // 向池子注入流动性
+      console.log("向交换池注入流动性...");
+      await mintTo(
+        provider.connection,
+        provider.wallet.payer,
+        tokenAMint,
+        poolTokenA,
+        provider.wallet.publicKey,
+        1000000000
+      );
+
+      await mintTo(
+        provider.connection,
+        provider.wallet.payer,
+        tokenBMint,
+        poolTokenB,
+        provider.wallet.publicKey,
+        1000000000
+      );
 
       console.log("交换池账户数据验证成功");
     } catch (err) {
@@ -227,11 +206,13 @@ describe("solana_swap", () => {
       await program.methods
         .swapAToB(amountToSwap)
         .accounts({
-          swapPool: swapPool,
+          poolAuthority: poolAuthority,
           poolTokenA: poolTokenA,
           poolTokenB: poolTokenB,
           userTokenA: userTokenA,
           userTokenB: userTokenB,
+          tokenAMint: tokenAMint,
+          tokenBMint: tokenBMint,
           user: provider.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
@@ -307,11 +288,13 @@ describe("solana_swap", () => {
       await program.methods
         .swapBToA(amountToSwap)
         .accounts({
-          swapPool: swapPool,
+          poolAuthority: poolAuthority,
           poolTokenA: poolTokenA,
           poolTokenB: poolTokenB,
           userTokenA: userTokenA,
           userTokenB: userTokenB,
+          tokenAMint: tokenAMint,
+          tokenBMint: tokenBMint,
           user: provider.wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
         })

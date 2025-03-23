@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token;
-use anchor_spl::token::{Token, Transfer, TokenAccount};
+use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
 
 declare_id!("GorTDpuWrsRf3THg5EpS2i3PLuncQZEhYRBi8ZBKSDo5");
 
@@ -8,20 +7,12 @@ declare_id!("GorTDpuWrsRf3THg5EpS2i3PLuncQZEhYRBi8ZBKSDo5");
 pub mod solana_swap {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>, seed: [u8; 8]) -> Result<()> {
-        let swap_pool = &mut ctx.accounts.swap_pool;
-        swap_pool.token_a_mint = ctx.accounts.token_a_mint.key();
-        swap_pool.token_b_mint = ctx.accounts.token_b_mint.key();
-        swap_pool.token_a_account = ctx.accounts.token_a_account.key();
-        swap_pool.token_b_account = ctx.accounts.token_b_account.key();
-        swap_pool.authority = ctx.accounts.authority.key();
-        swap_pool.seed = seed.to_vec();
-
+    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         msg!("交换池初始化成功！");
         Ok(())
     }
 
-    pub fn swap_a_to_b(ctx: Context<Swap>, amount: u64) -> Result<()> {
+    pub fn swap_a_to_b(ctx: Context<SwapAToB>, amount: u64) -> Result<()> {
         // 验证数量大于0
         require!(amount > 0, ErrorCode::InvalidAmount);
         
@@ -44,40 +35,37 @@ pub mod solana_swap {
             authority: ctx.accounts.user.to_account_info(),
         };
 
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                transfer_a_to_pool,
-            ),
-            amount,
-        )?;
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_a_to_pool,
+        );
+
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
 
         // 从池子的代币B账户转移到用户的代币B账户
-        let bump = ctx.bumps.swap_pool;
-        let seed = &ctx.accounts.swap_pool.seed;
-        let seeds = &[b"swap_authority".as_ref(), seed.as_slice(), &[bump]];
+        let bump = ctx.bumps.pool_authority;
+        let seeds = &[b"pool_authority".as_ref(), &[bump]];
         let signer = &[&seeds[..]];
         
         let transfer_b_to_user = Transfer {
             from: ctx.accounts.pool_token_b.to_account_info(),
             to: ctx.accounts.user_token_b.to_account_info(),
-            authority: ctx.accounts.swap_pool.to_account_info(),
+            authority: ctx.accounts.pool_authority.to_account_info(),
         };
 
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                transfer_b_to_user,
-                signer,
-            ),
-            amount, // 1:1比例
-        )?;
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_b_to_user,
+            signer,
+        );
+
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
 
         msg!("代币A兑换成代币B成功！金额: {}", amount);
         Ok(())
     }
 
-    pub fn swap_b_to_a(ctx: Context<Swap>, amount: u64) -> Result<()> {
+    pub fn swap_b_to_a(ctx: Context<SwapBToA>, amount: u64) -> Result<()> {
         // 验证数量大于0
         require!(amount > 0, ErrorCode::InvalidAmount);
         
@@ -100,34 +88,31 @@ pub mod solana_swap {
             authority: ctx.accounts.user.to_account_info(),
         };
 
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                transfer_b_to_pool,
-            ),
-            amount,
-        )?;
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_b_to_pool,
+        );
+
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
 
         // 从池子的代币A账户转移到用户的代币A账户
-        let bump = ctx.bumps.swap_pool;
-        let seed = &ctx.accounts.swap_pool.seed;
-        let seeds = &[b"swap_authority".as_ref(), seed.as_slice(), &[bump]];
+        let bump = ctx.bumps.pool_authority;
+        let seeds = &[b"pool_authority".as_ref(), &[bump]];
         let signer = &[&seeds[..]];
         
         let transfer_a_to_user = Transfer {
             from: ctx.accounts.pool_token_a.to_account_info(),
             to: ctx.accounts.user_token_a.to_account_info(),
-            authority: ctx.accounts.swap_pool.to_account_info(),
+            authority: ctx.accounts.pool_authority.to_account_info(),
         };
 
-        token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                transfer_a_to_user,
-                signer,
-            ),
-            amount, // 1:1比例
-        )?;
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_a_to_user,
+            signer,
+        );
+
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
 
         msg!("代币B兑换成代币A成功！金额: {}", amount);
         Ok(())
@@ -135,103 +120,132 @@ pub mod solana_swap {
 }
 
 #[derive(Accounts)]
-#[instruction(seed: [u8; 8])]
 pub struct Initialize<'info> {
+    // 创建PDA作为池子代币账户的管理者
+    /// CHECK: 这是一个派生的PDA，用作池子权限
     #[account(
-        init, 
-        payer = authority, 
-        space = SwapPool::SIZE,
-        seeds = [b"swap_authority".as_ref(), seed.as_ref()],
+        init_if_needed,
+        payer = admin,
+        seeds = [b"pool_authority"],
+        bump,
+        space = 8
+    )]
+    pub pool_authority: AccountInfo<'info>,
+
+    // 代币A的池子账户
+    #[account(
+        init_if_needed,
+        payer = admin,
+        seeds = [b"token_pool_a", token_a_mint.key().as_ref()],
+        token::mint = token_a_mint,
+        token::authority = pool_authority,
         bump
     )]
-    pub swap_pool: Account<'info, SwapPool>,
-    
-    pub token_a_mint: Account<'info, token::Mint>,
-    
-    pub token_b_mint: Account<'info, token::Mint>,
-    
+    pub pool_token_a: Account<'info, TokenAccount>,
+
+    // 代币B的池子账户
     #[account(
-        constraint = token_a_account.mint == token_a_mint.key() @ ErrorCode::InvalidMint,
-        constraint = token_a_account.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+        init_if_needed,
+        payer = admin,
+        seeds = [b"token_pool_b", token_b_mint.key().as_ref()],
+        token::mint = token_b_mint,
+        token::authority = pool_authority,
+        bump
     )]
-    pub token_a_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        constraint = token_b_account.mint == token_b_mint.key() @ ErrorCode::InvalidMint,
-        constraint = token_b_account.owner == swap_pool.key() @ ErrorCode::InvalidOwner
-    )]
-    pub token_b_account: Account<'info, TokenAccount>,
+    pub pool_token_b: Account<'info, TokenAccount>,
+
+    pub token_a_mint: Account<'info, Mint>,
+    pub token_b_mint: Account<'info, Mint>,
     
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
-pub struct Swap<'info> {
+pub struct SwapAToB<'info> {
+    /// CHECK: 这是一个派生的PDA，用作池子权限
     #[account(
         mut,
-        seeds = [b"swap_authority".as_ref(), swap_pool.seed.as_slice()],
-        bump,
+        seeds = [b"pool_authority"],
+        bump
     )]
-    pub swap_pool: Account<'info, SwapPool>,
-    
+    pub pool_authority: AccountInfo<'info>,
+
     #[account(
         mut,
-        constraint = pool_token_a.mint == swap_pool.token_a_mint @ ErrorCode::InvalidMint,
-        constraint = pool_token_a.key() == swap_pool.token_a_account @ ErrorCode::InvalidAccount,
-        constraint = pool_token_a.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+        seeds = [b"token_pool_a", token_a_mint.key().as_ref()],
+        bump,
+        token::mint = token_a_mint,
+        token::authority = pool_authority,
     )]
     pub pool_token_a: Account<'info, TokenAccount>,
-    
+
     #[account(
         mut,
-        constraint = pool_token_b.mint == swap_pool.token_b_mint @ ErrorCode::InvalidMint,
-        constraint = pool_token_b.key() == swap_pool.token_b_account @ ErrorCode::InvalidAccount,
-        constraint = pool_token_b.owner == swap_pool.key() @ ErrorCode::InvalidOwner
+        seeds = [b"token_pool_b", token_b_mint.key().as_ref()],
+        bump,
+        token::mint = token_b_mint,
+        token::authority = pool_authority,
     )]
     pub pool_token_b: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        constraint = user_token_a.mint == swap_pool.token_a_mint @ ErrorCode::InvalidMint,
-        constraint = user_token_a.owner == user.key() @ ErrorCode::InvalidOwner
-    )]
+
+    #[account(mut)]
     pub user_token_a: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        constraint = user_token_b.mint == swap_pool.token_b_mint @ ErrorCode::InvalidMint,
-        constraint = user_token_b.owner == user.key() @ ErrorCode::InvalidOwner
-    )]
+
+    #[account(mut)]
     pub user_token_b: Account<'info, TokenAccount>,
-    
+
+    pub token_a_mint: Account<'info, Mint>,
+    pub token_b_mint: Account<'info, Mint>,
+
     #[account(mut)]
     pub user: Signer<'info>,
-    
     pub token_program: Program<'info, Token>,
 }
 
-#[account]
-pub struct SwapPool {
-    pub token_a_mint: Pubkey,
-    pub token_b_mint: Pubkey,
-    pub token_a_account: Pubkey,
-    pub token_b_account: Pubkey,
-    pub authority: Pubkey,
-    pub seed: Vec<u8>,
-}
+#[derive(Accounts)]
+pub struct SwapBToA<'info> {
+    /// CHECK: 这是一个派生的PDA，用作池子权限
+    #[account(
+        mut,
+        seeds = [b"pool_authority"],
+        bump
+    )]
+    pub pool_authority: AccountInfo<'info>,
 
-impl SwapPool {
-    pub const SIZE: usize = 8 + // 歧视器
-        32 + // token_a_mint
-        32 + // token_b_mint
-        32 + // token_a_account
-        32 + // token_b_account
-        32 + // authority
-        4 + 32; // seed (4字节长度 + 最多32字节数据)
+    #[account(
+        mut,
+        seeds = [b"token_pool_a", token_a_mint.key().as_ref()],
+        bump,
+        token::mint = token_a_mint,
+        token::authority = pool_authority,
+    )]
+    pub pool_token_a: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"token_pool_b", token_b_mint.key().as_ref()],
+        bump,
+        token::mint = token_b_mint,
+        token::authority = pool_authority,
+    )]
+    pub pool_token_b: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub user_token_a: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub user_token_b: Account<'info, TokenAccount>,
+
+    pub token_a_mint: Account<'info, Mint>,
+    pub token_b_mint: Account<'info, Mint>,
+
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[error_code]
